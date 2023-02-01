@@ -13,14 +13,19 @@
 #include <string>
 
 using namespace std;
-
+/* 
+	data_points and *_val is for full dynamics, other is for equilibriation
+*/
 const int data_points = 30;
 const float min_val = 1;
 const float max_val = 3.5;
 const int iterations = 5000;
 
-const string filename = "test/kawasaki_fracdim_bigbox_m0_32.txt"; /* FOlDER SHOULD BE CREATED PRIOR TO CODE EXECUTION, erased - 1.txt*/
-const string filepath = "competing_data/64-eq_0m_t100000_t100_Kawa0_bbJKpc_p";
+/* 
+	Filenames and paths for calculations output
+*/
+const string filename = "test/kawasaki_fracdim_bigbox_m0_32.txt"; /* Old file for equilibriation output */
+const string filepath = "competing_data/64-eq_0m_t100000_t100_Kawa0_bbJKpc_p"; /* Current file (with folder) for full dynamics output*/
 const string ending = ".txt";
 
 struct compEquilib {
@@ -33,6 +38,9 @@ struct compEquilib {
 	bool m1, m2, uni;
 };
 
+/* 
+	Below is a datastruct to store spatial diversity values and print to file the full dynamics
+*/
 struct dataIsing { 
 	float T1[data_points] = { 0 };
 	float T2[data_points] = { -1 }; /* This means that kawasaki works as a pumping device */
@@ -48,6 +56,11 @@ struct dataIsing {
 	float F_95down[data_points] = { 0 };
 };
 
+/* 
+	Below is a protoype class for single dynamics implementation
+	Classes Metropolis and Kawasaki inherit this ones variables and methods
+	Class named Competing is based on this one and functions are sometimes duplicate - more descriptions in that file
+*/
 class Ising {
 public:
 	int N, t;
@@ -618,6 +631,14 @@ public:
 
 };
 
+/*
+	Main class for competing dynamics Ising object generation
+	Class includes:
+		dynamics implementation (single and competing)
+		state parameter calculations
+		diversity index calculation methods
+		fractal dimension via box-counting method calculations
+*/
 class Competing{
 public:
 	
@@ -630,8 +651,16 @@ public:
 	float* Mag;
 	float* Index;
 	float* FracDim;
+
+	/*
+		Lattice variable
+	*/
 	int** array;
 
+	/*
+		dynamic arrays to store locations of up/down spins
+		something similar to "sparse" matrix entry storing
+	*/
 	vector<int> up_x;
 	vector<int> up_y;
 	vector<int> down_x;
@@ -642,7 +671,16 @@ public:
 	bool lattice_param;	
 
 	Competing(int n, float kT1, float kT2, float p, float m, int iter1, int iter2, bool uniform) {
-
+		/*
+			Constructor to initialize simulation parameters: 
+				size of array (one dimension of 2D lattice)
+				certain kT1 and kT2 temperatures 
+				selected dynamic selection parameter p
+				initial magnetization m (for kawasaki initial ordering)
+				number of iterations
+				lattice_param defines initial ordering (i.e. (anti)ferromagnetic or paramagnetic)
+			Initialization is sufficient to start calculations
+		*/
 		N = n; /* Size of array */
 
 		beta1 = 1 / kT1; /* Temperature parameter Beta */
@@ -695,7 +733,11 @@ public:
 		delete[] FracDim;
 	}
 
-	/* Initializing functions for random, uniform and kawasaki configurations*/
+	/* 
+		Initializing functions for random, uniform and Kawasaki configurations
+		Kawasaki configuration has initial mean magnetization m which does not change
+	*/
+
 	void initUniform(int initConfig) {
 		for (int i = 0; i < N; i++) {
 			for (int j = 0; j < N; j++) {
@@ -739,8 +781,10 @@ public:
 		delete[] darr;
 	}
 
-	/* Functions to calculate energy and order parameter (magnetization)
-	Also utility function to calculate neighbour spins is here*/
+	/* 
+		Functions to calculate energy and order parameter (magnetization)
+		Also utility function to calculate neighbour spins is here
+	*/
 
 	int calcEnergy() {
 		int temp_Energy = 0;
@@ -784,8 +828,11 @@ public:
 			array[pos[0]][ydown % N];
 	}
 
-	/* Following three functions are for working with up/down spin lists
-	vectors are employed to dynamically store and move spin position information*/
+	/* 
+		Following three functions are for working with up/down spin lists
+		vectors are employed to dynamically store and move spin position information
+		vectors serve like entries of "sparse" matrix
+	*/
 
 	void initializeLists() {
 		for (int i = 0; i < N; i++) {
@@ -833,9 +880,19 @@ public:
 		}
 	}
 
-	/* Functions for diversity index I calculation. Performs scaling and calculating */
+	/* 
+		Functions for diversity index I calculation
+		Performs scaling and calculating
+	*/
 
-	float trapezoid(int ptr_scales[], float ptr_vals[], int arrLen) { /* Trapezoid 1/2(xi-xj)(fxi + fxj), j=i+1*/
+	float trapezoid(int ptr_scales[], float ptr_vals[], int arrLen) {
+		/*
+			Calculates area under the curve of relative scaling law.
+			Uses Trapezoid integration rule: 1/2(xi-xj)(fxi + fxj), j=i+1
+				ptr_scales are x's
+				ptr_vals are y's
+				arrLen is total number of values
+		*/
 		float integral = 0;
 
 		for (int i = 0; i < arrLen - 1; i++) {
@@ -846,8 +903,11 @@ public:
 	}
 
 	float autoScale(int scale) { /* returns a value of std for resized lattice to index calculation */
-
-		/* Create new resized lattice */
+		/* 
+			Creates new resized lattice after scaling the original lattice by size scale
+			variable "scale" can also be thought of as a resolution multiplier (reducing resolution)
+			transformation is similar to renormalization technique, except new values are mean of joined values
+		*/
 		int N_new = ceil(float(N) / float(scale));
 		float** resizedArr = new float* [N_new];
 
@@ -874,7 +934,10 @@ public:
 		}
 		sumMeanArr = sumMeanArr / (powf(N_new, 2));
 
-		/* Calculate the standard deviation */
+		/* 
+			Calculating the standard deviation of spins in such lattice for scaling curve
+			This standard deviation is later normalized to original lattice one (it is always smaller)
+		*/
 		float std = 0;
 
 		for (int x = 0; x < N_new; x++) {
@@ -893,8 +956,14 @@ public:
 	}
 
 	float calcIndex() {
+		
+		/*
+			Diversity index I calculation function. I values range in [-1, 1]
+			Employs auto_scale function to get standard deviation value for scaled lattice
+			For a number of scales_arrLen points a scaling curve is created
+			trapezoid function is used to calculate area under it and form diversity index values in appropriate range
+		*/
 
-		/* Get scales and diversity measurement values */
 		int scales_arrLen = floor(log2(N));
 		int* scales = new int[scales_arrLen];
 		float* vals = new float[scales_arrLen];
@@ -909,7 +978,10 @@ public:
 		}
 		minimal_vals[0] = 1;
 
-		/* Make diversity measurement values relative to the first one, accord to the finest scale*/
+		/* 
+			Make diversity measurement values relative to the first one, accord to the finest resolution (original) scale
+			This ensures the curve reproducability
+		*/
 		if (vals[0] != 0) {
 			for (int i = scales_arrLen - 1; i > -1; i--) {
 				vals[i] = vals[i] / vals[0];
@@ -948,9 +1020,17 @@ public:
 		return index;
 	}
 
-	/* The following methods are for fractal dimension of lattice configuration calculations */
+	/* 
+		The following methods are for fractal dimension of lattice configuration calculations
+		Box-counting method is employed which makes use of scaling boxes to be fitted on lattice
+		Since the scaling used is always finite due to finitiness of lattice, it can be also termed finite-size scaling law
+		Note: usually there are no single best fit (multifractality emerges) so this only takes best value for linear regression
+	*/
 
 	void makeLogspace(float* data_values, int points, float min_exp, float max_exp, float base = 2) {
+		/*
+			Makes logspace array, useful to have linear points in a log-log plot
+		*/
 		float diff = (max_exp - min_exp) / (points - 1);
 		for (int i = 0; i < points; i++) {
 			data_values[i] = powf(base, min_exp + diff * (i));
@@ -958,6 +1038,9 @@ public:
 	}
 
 	void makeLinspace(float* data_values, int points, float min_val, float max_val) {
+		/*
+			Distributes values linspace in an array
+		*/
 		float diff = (max_val - min_val) / (points - 1);
 		for (int i = 0; i < points; i++) {
 			data_values[i] = min_val + diff * i;
@@ -965,6 +1048,15 @@ public:
 	}
 
 	int check_bin(float* row, float* col, int a, float m) {
+		/*
+			Checks if the current box has a spin of desired value inside of it
+			Since we dont need a full values of 2D histogram, just a bollean type True or False value - we can return 0 or 1
+			Other return methods may be used (which are commented below):
+				return 1 only if the spins in the box have similar mean magnetization
+				if the mean magnetization is non zero/one
+				etc.
+			Such methods are better at grasping interfaces and solid bodies of lattice
+		*/
 		float sum = 0;
 		float it = 0;
 		for (int k = ceil(row[0]); k <= floor(row[1]); k++) {
@@ -991,6 +1083,11 @@ public:
 	}
 
 	int bin_count(float scale, float offset, int a, float m) {
+		/*
+			Function to form the 2D histogram
+			scale is the side length of square box
+			offset is the value to be offset from initial array position (for count minimizing)
+		*/
 		int count = 0;
 		for (float i = -offset; i < N; i += scale) {
 			for (float j = -offset; j < N; j += scale) {
@@ -1004,7 +1101,10 @@ public:
 	}
 
 	void linearRegression(float* coeffs, float* x_vals_inv, float* y_vals, int n_vals) {
-		/* simple linear regression https://www.bragitoff.com/2015/09/c-program-to-linear-fit-the-data-using-least-squares-method/ */
+		/* 
+			simple linear regression taken from https://www.bragitoff.com/2015/09/c-program-to-linear-fit-the-data-using-least-squares-method/ 
+			Note: proves to be untrustworthy in getting spectrum of fractal dimensions.
+		*/
 		float xsum = 0, x2sum = 0, ysum = 0, xysum = 0;
 
 		for (int i = 0; i < n_vals; i++) {
@@ -1020,6 +1120,16 @@ public:
 	}
 
 	float calcFracDim(int a, int m, int n_scales = 10, int n_offsets = 5, float min_exp = 2, float max_exp = 5) {
+		/*
+			Calculate fractal dimension values for a given array at
+				number of scales n_scales
+				number of offsets n_offests for count of boxes minimizin
+				min_exp and max_exp define the scaling interval by box side length (these variables are exponents, not values)
+
+				small-boxes scaling interval - 0.05 up to 2 (or 3)
+				big-boxes scaling interval - 2 (or 3) up to quarter or half length of initial lattice side length
+		
+		*/
 		float dim[2] = { 0 };
 		float* scales = new float[n_scales]; /* input param */
 		float* bin_vals = new float[n_scales];
@@ -1054,7 +1164,22 @@ public:
 		return dim[0];
 	}
 
-	/* Below are 3 functions necessary for mixed dynamics implementation. JUST FOR EQUILIBRIATION */
+	/* 
+		Functions below are necessary for mixed dynamics implementation
+		Competing dynamics makes selection of dynamics and state (and spatial diversity) parameter calculation
+		MC_Metropolis or MC_Kawasaki makes single dynamic implementation employing "sparse" matrix entries vectors:
+			works very good when equilibriating Kawasaki type of dynamics (for small p)
+			reduces speed of equilibriation at high p values. Metropolis step is very slow
+		MC_Metropolis_clean or MC_Kawasaki_clean are single dynamics implementation without using vectors for mapping values
+
+		Kawasaki dynamcis below are global
+		Exponents are calculated for single dynamic calculation as they dont change values for one instance of object
+
+		Equilibriation values need to be higher than usual (10^5 or 10^6)
+		Averaging can be minimal (10 - 10^2) when lattice is equilibriated
+
+		95% confidence gap may be calculated by sorting the Fdim or I averagin values arrays
+	*/
 
 	void competing_dynamics(float* ptr_E, float* ptr_M, float* ptr_M_up, float* ptr_M_down, float* ptr_I, float* ptr_I_up, float* ptr_I_down, float* ptr_F, float* ptr_F_up, float* ptr_F_down) { /* random number values will be passed from this function to MC step functions*/
 
@@ -1252,16 +1377,10 @@ void printEquilibrium(float* E, float* M, float* I, int* P, float* F, int num);
 
 int main() {
 
-	/*	The code section below is to perform calculations on equilibriation of competing dynamics Ising model.
-	*	Input parameters are entailed in structure type compEquilib.
-	*	Equilibriation values for each lattice sweep are stored in dynamically allocated arrays for memory conserving purposes.
-	*	Data is saved in folder test (must be created pre-run). Filename is the selected name for document, it is created by template (const string) + p value.
-	* 
-	*	Class by the name Competing is used. Its function competing_dynamics performs equilibriation. This function calls two MonteCarlo step functions - one for each type of dynamics.
-	*	Class also has methods for calculating values of interest (diversity index, magnetization, energy, fractal dimension). Other methods cover lattice initialization (random, uniform and random
-	*	with desired initial magnetization).
+	/*
+		The code below is for equilibriation implementation
+		It was only used for initial tests of code
 	*/
-	
 	/*
 	compEquilib data;
 	data.N = 128;
@@ -1291,17 +1410,13 @@ int main() {
 		delete[] F;
 	}
 	*/
-
-	/*	This code section is dedicated to calculation of median and percentile values for qualities of interest over an array of temperature points.
-	*	Values of interest - magnetization, energy, diversity index, index percentile [5, 95], fractal dimension and its percentile [5, 95].
-	*	Experiment results are stored in structure dataIsing.
-	* 
-	*	For Metropolis or Kawasaki dynamics a class by the same name is called for initialization. This class inherits methods from more general Ising class.
-	*	Ising class stores all global values and parameters required for calculations. The selected dynamics class in turn has dynamics implementation function and MonteCarlo step function
-	*	Output is printed similarly to equilibriation. Folder must be created before hand and filename is defined as const string.
+	
+	/*
+		Below is the main function for dynamics over a range of parameters T1, T2 and p calculations
+		We set number of p values and initiate in the for cycle
+		T1 (Metropolis temperature) values are set by constants in the beggining of .cpp file
+		T2 values should be set inside the cycle for various cases of Kawasaki dynamics
 	*/
-
-	/* Set m, p and it */
 	const int num_points = 4;
 	float p[num_points] = { 0 };
 	float m = 0;
